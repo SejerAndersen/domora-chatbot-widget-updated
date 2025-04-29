@@ -208,6 +208,34 @@
         max-width: none;
       }
     }
+    
+    /* Add widget mode specific styles */
+    body.widget-mode {
+      background: transparent;
+      padding: 0;
+      overflow: hidden;
+    }
+    body.widget-mode #intro-container {
+      display: none;
+    }
+    body.widget-mode .domora-chat-container {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      max-height: 100vh;
+      bottom: auto;
+      right: auto;
+      border-radius: 0;
+      opacity: 1;
+      transform: none;
+      box-shadow: none;
+    }
+    body.widget-mode .domora-chat-close {
+      display: none;
+    }
+    body.widget-mode .domora-chat-bubble {
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -258,6 +286,7 @@
         this.hideIntro = urlParams.get('hideIntro') === 'true';
         this.customIntro = urlParams.get('introText');
         this.primaryColor = urlParams.get('color') || '#4f46e5';
+        this.widgetMode = urlParams.get('widgetOnly') === 'true';
         
         // Use CORS proxy for the webhook URL to avoid cross-origin issues
         this.webhookUrl = this.webhookUrlParam || 'https://corsproxy.io/?' + encodeURIComponent('https://replxai.app.n8n.cloud/webhook-test/29901a3-e71e-4510-9be1-a7c96ed1edc6');
@@ -277,6 +306,9 @@
         
         // Initialize chat
         this.initialize();
+        
+        // Set up postMessage communication for iframe integration
+        this.setupPostMessageAPI();
       }
       
       initialize() {
@@ -288,7 +320,16 @@
           this.introTextElement.textContent = this.customIntro;
         }
         
-        if (this.hideIntro) {
+        // Apply widget mode if specified
+        if (this.widgetMode) {
+          document.body.classList.add('widget-mode');
+          this.toggleChat(true); // Automatically show the chat
+          
+          // Notify parent window that widget is ready
+          if (window.parent !== window) {
+            window.parent.postMessage({ type: 'DOMORA_WIDGET_READY' }, '*');
+          }
+        } else if (this.hideIntro) {
           this.introContainer.style.display = 'none';
         }
         
@@ -305,7 +346,13 @@
         
         // Event listeners
         this.bubble.addEventListener('click', () => this.toggleChat(true));
-        this.closeButton.addEventListener('click', () => this.toggleChat(false));
+        this.closeButton.addEventListener('click', () => {
+          this.toggleChat(false);
+          // Notify parent window that chat was closed
+          if (window.parent !== window) {
+            window.parent.postMessage({ type: 'DOMORA_CHAT_CLOSED' }, '*');
+          }
+        });
         this.sendButton.addEventListener('click', () => this.sendMessage());
         this.inputField.addEventListener('keypress', (e) => {
           if (e.key === 'Enter') {
@@ -317,14 +364,46 @@
         this.addMessage("Hello! How can I help you today?", 'bot');
       }
       
+      setupPostMessageAPI() {
+        // Listen for messages from parent window
+        window.addEventListener('message', (event) => {
+          // Security check - you might want to restrict origins
+          try {
+            const data = event.data;
+            
+            // Handle various commands
+            if (data.type === 'DOMORA_TOGGLE_CHAT') {
+              this.toggleChat(data.show);
+            } else if (data.type === 'DOMORA_SEND_MESSAGE') {
+              if (data.message) {
+                // Simulate user sending this message
+                this.inputField.value = data.message;
+                this.sendMessage();
+              }
+            }
+          } catch (error) {
+            console.error('Error processing message from parent:', error);
+          }
+        });
+      }
+      
       toggleChat(show) {
         if (show) {
           this.container.classList.add('show');
-          this.bubble.style.display = 'none';
+          if (!this.widgetMode) {
+            this.bubble.style.display = 'none';
+          }
           this.inputField.focus();
+          
+          // Notify parent window that chat was opened
+          if (window.parent !== window) {
+            window.parent.postMessage({ type: 'DOMORA_CHAT_OPENED' }, '*');
+          }
         } else {
           this.container.classList.remove('show');
-          this.bubble.style.display = 'flex';
+          if (!this.widgetMode) {
+            this.bubble.style.display = 'flex';
+          }
         }
       }
       
@@ -335,6 +414,15 @@
         messageDiv.textContent = content;
         this.messagesContainer.appendChild(messageDiv);
         this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        
+        // Notify parent of new message
+        if (window.parent !== window) {
+          window.parent.postMessage({
+            type: 'DOMORA_NEW_MESSAGE',
+            message: content,
+            sender: sender
+          }, '*');
+        }
       }
       
       showTypingIndicator() {
@@ -447,6 +535,9 @@
     // Initialize the chatbot when DOM is loaded
     document.addEventListener('DOMContentLoaded', () => {
       const chatbot = new DomoraChatbot();
+      
+      // Make the chatbot instance globally accessible for debugging
+      window.domoraChatbot = chatbot;
     });
   </script>
 </body>
